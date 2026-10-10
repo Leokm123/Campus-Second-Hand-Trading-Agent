@@ -14,6 +14,7 @@ var I18N = {
         app_title: "校园二手交易 Agent",
         btn_send: "发送",
         btn_reimport: "重新导入数据",
+        btn_new_chat: "开启新对话",
         btn_extract: "AI 提取商品信息",
         btn_back: "返回",
         btn_confirm_import: "确认导入选中项",
@@ -30,11 +31,11 @@ var I18N = {
         source_demo: "演示数据",
         source_text: "粘贴文本",
         source_file: "上传文件",
-        demo_hint: "点击下方按钮加载内置演示数据（30条模拟群聊消息）",
-        demo_more: "...共30条消息",
+        demo_hint: "点击下方按钮加载内置演示数据（32条模拟群聊消息）",
+        demo_more: "...共32条消息",
         text_hint: "粘贴群聊记录（每行一条，格式：昵称: 消息内容）",
         file_hint: "选择 .txt 或 .json 文件（聊天记录导出）",
-        paste_placeholder: "Zhang: Selling Giant ATX660 bicycle, 9/10 condition, 250 yuan, WeChat: zhang123, South Gate trade\nLi: Merida Duke 300, 8/10 condition, 280 yuan, free shipping on campus, contact wx_li456\nWang: Anyone want second-hand textbooks? Calculus and Linear Algebra available, 20 yuan each, trade on campus\n...",
+        paste_placeholder: "Zhang: Selling Giant ATX660 bicycle, 9/10 condition, 250 yuan, WeChat: zhang123, South Gate trade\nLi: Merida Duke 300, 8/10 condition, 280 yuan, free shipping on campus, contact wx_li456\nQian: Selling bicycle, 20 yuan\nWang: Anyone want second-hand textbooks? Calculus and Linear Algebra available, 20 yuan each, trade on campus\n...",
 
         confirm_title: "确认导入",
         select_all: "全选",
@@ -46,6 +47,7 @@ var I18N = {
         msg_no_data: "请先导入数据",
         msg_select_at_least: "请至少选择一条商品信息",
         msg_reset_confirm: "确定重新导入数据？当前已导入的数据将被清除。",
+        msg_new_chat_confirm: "开启新对话？当前对话内容将被清除。",
         msg_paste_empty: "请粘贴聊天记录",
         msg_file_empty: "请选择文件",
         msg_import_fail: "导入失败: ",
@@ -103,6 +105,7 @@ var I18N = {
         app_title: "Campus Second-Hand Trading Agent",
         btn_send: "Send",
         btn_reimport: "Re-import Data",
+        btn_new_chat: "New Chat",
         btn_extract: "AI Extract Listings",
         btn_back: "Back",
         btn_confirm_import: "Confirm Import",
@@ -119,11 +122,11 @@ var I18N = {
         source_demo: "Demo Data",
         source_text: "Paste Text",
         source_file: "Upload File",
-        demo_hint: "Click to load built-in demo data (30 simulated group chat messages)",
-        demo_more: "...30 messages total",
+        demo_hint: "Click to load built-in demo data (32 simulated group chat messages)",
+        demo_more: "...32 messages total",
         text_hint: "Paste chat records (one per line, format: Name: Message)",
         file_hint: "Select .txt or .json file (exported chat records)",
-        paste_placeholder: "Zhang: Selling Giant ATX660 bike, 9/10 condition, 250 yuan, WeChat zhang123, South Gate\nLi: Merida Duke 300, 8/10 condition, 280, free shipping on campus, wx_li456\nWang: Any textbooks? Calculus & Linear Algebra, 20 each, on campus\n...",
+        paste_placeholder: "Zhang: Selling Giant ATX660 bike, 9/10 condition, 250 yuan, WeChat zhang123, South Gate\nLi: Merida Duke 300, 8/10 condition, 280, free shipping on campus, wx_li456\nQian: Selling bicycle, 20 yuan\nWang: Any textbooks? Calculus & Linear Algebra, 20 each, on campus\n...",
 
         confirm_title: "Confirm Import",
         select_all: "Select All",
@@ -135,6 +138,7 @@ var I18N = {
         msg_no_data: "Please import data first",
         msg_select_at_least: "Please select at least one listing",
         msg_reset_confirm: "Re-import data? Current data will be cleared.",
+        msg_new_chat_confirm: "Start a new chat? The current conversation will be cleared.",
         msg_paste_empty: "Please paste chat records",
         msg_file_empty: "Please select a file",
         msg_import_fail: "Import failed: ",
@@ -198,6 +202,18 @@ function t(key, params) {
         });
     }
     return str;
+}
+
+function formatCondition(condition) {
+    if (!condition || LANG !== "en") return condition;
+    var value = String(condition).trim();
+    if (/^(全新|全新未拆|全新没用过)$/.test(value)) return "Brand new";
+    var match = value.match(/^(10|[1-9])\s*成新$/);
+    if (match) return match[1] + "/10 condition";
+    var chineseDigits = { "十": "10", "九": "9", "八": "8", "七": "7", "六": "6", "五": "5", "四": "4", "三": "3", "二": "2", "一": "1" };
+    match = value.match(/^([十九八七六五四三二一])成新$/);
+    if (match) return chineseDigits[match[1]] + "/10 condition";
+    return value;
 }
 
 function applyI18n() {
@@ -342,7 +358,7 @@ function renderConfirmList(listings) {
         var priceText = item.price
             ? (item.price == parseInt(item.price) ? item.price : item.price) + (LANG === "zh" ? "元" : " yuan")
             : t("price_unknown");
-        var condText = item.condition || t("cond_unknown");
+        var condText = formatCondition(item.condition) || t("cond_unknown");
         var locText = item.location || t("loc_unknown");
         var contactText = item.contact || t("contact_none");
 
@@ -447,6 +463,19 @@ function resetImport() {
     .catch(function(err) {
         alert(t("msg_reset_fail") + err.message);
     });
+}
+
+function startNewChat() {
+    if (!confirm(t("msg_new_chat_confirm"))) return;
+    resetConversationContext();
+    userInput.value = "";
+    chatArea.innerHTML =
+        '<div class="welcome-msg">' +
+            '<p>' + t("welcome_1") + '</p>' +
+            '<p>' + t("welcome_2") + '</p>' +
+            '<p class="example">' + t("welcome_example") + '</p>' +
+        '</div>';
+    userInput.focus();
 }
 
 // ==================== 主聊天逻辑 ====================
@@ -592,7 +621,7 @@ function addListingCards(results) {
             : t("price_unknown");
 
         // 卡片字段统一按当前语言显示，避免中英文混杂
-        var condDisplay = item.condition || t("field_unknown");
+        var condDisplay = formatCondition(item.condition) || t("field_unknown");
         var sellerDisplay = item.seller || t("field_unknown");
         var locDisplay = item.location ? formatLocation(item.location) : t("field_unknown");
 
