@@ -216,11 +216,12 @@ Given a user's need and a list of listings, determine which listings match and s
 
 Matching rules:
 - Product name: semantic match (e.g., "bicycle" matches "bike", "Giant ATX660", "Merida Duke")
-- Price: must be within budget (or very close, within 10% over)
+- Price: must be within budget (or close, within 20% over)
 - Location: should match or be compatible (e.g., "on campus" matches "East Area", "South Gate")
+- Items without a listed location should still be included if they match product and price
 - Exclude listings that are clearly not the same category of item
 
-Scoring (0-100):
+Return up to 10 matching listings. Scoring (0-100):
 - Price attractiveness (40%): lower price relative to budget = higher score
 - Condition (30%): better condition = higher score
 - Description completeness (30%): more details and contact info = higher score
@@ -235,11 +236,12 @@ Only return the JSON array, no explanation."""
 
 匹配规则:
 - 商品名称语义匹配（如"自行车"匹配"捷安特ATX660""bike""山地车"等）
-- 价格需在预算范围内（或超出10%以内也可）
+- 价格需在预算范围内（或超出20%以内也可）
 - 地点应匹配或兼容（如"校内"匹配"东区""南门"等校内区域）
+- 无地点信息的商品，只要商品和价格匹配也应保留
 - 排除明显不相关的商品
 
-评分（0-100）:
+最多返回 10 个匹配商品。评分（0-100）:
 - 价格吸引力(40%): 相对预算越低分越高
 - 成色(30%): 成色越好分越高
 - 描述完整度(30%): 信息越全、有联系方式分越高
@@ -425,7 +427,7 @@ def match_listings_regex(listings, user_need):
         user_need: parse_user_need 的输出
 
     Returns:
-        排序后的匹配 listing 列表
+        排序后的匹配 listing 列表（最多返回 10 条）
     """
     matched = []
 
@@ -454,30 +456,44 @@ def match_listings_regex(listings, user_need):
             if not (direct_match or desc_match or category_match or alias_match):
                 continue
 
-        # 预算过滤
+        # 预算过滤：允许价格最多超出预算 20%，超出会降分但不直接排除
+        price_ok = True
+        over_budget_ratio = 0.0
         if user_need["budget"] and listing.get("price"):
-            if listing["price"] > user_need["budget"]:
+            price = listing["price"]
+            budget = user_need["budget"]
+            if price > budget * 1.2:
                 continue
+            if price > budget:
+                over_budget_ratio = (price - budget) / budget
+                price_ok = False
 
-        # 地点匹配
+        # 地点匹配：地点不匹配时降分，但不直接排除；listing 无地点也保留
+        location_ok = True
         if user_need["location"] and listing.get("location"):
             user_loc = user_need["location"]
             list_loc = listing["location"] or ""
             if user_loc == "校内":
                 campus_areas = ["校内", "东区", "西区", "南区", "北区", "东门", "西门", "南门", "北门"]
                 if list_loc not in campus_areas:
-                    continue
+                    location_ok = False
             else:
                 if user_loc.lower() not in list_loc.lower() and list_loc.lower() not in user_loc.lower():
-                    continue
+                    location_ok = False
 
         # 评分
         score = _calculate_score_regex(listing, user_need)
-        listing["match_score"] = score
+        # 地点不匹配的惩罚
+        if not location_ok:
+            score -= 15
+        # 超出预算惩罚（按超出比例，最高扣 25 分）
+        if not price_ok:
+            score -= int(over_budget_ratio * 100 + 10)
+        listing["match_score"] = max(0, score)
         matched.append(listing)
 
     matched.sort(key=lambda x: x.get("match_score", 0), reverse=True)
-    return matched
+    return matched[:10]
 
 
 def _calculate_score_regex(listing, user_need):

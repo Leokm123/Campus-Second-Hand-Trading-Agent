@@ -69,6 +69,11 @@ var I18N = {
         risk_yellow: "可考虑",
         risk_red: "不建议",
 
+        agent_panel_title: "Agent 工作面板",
+        agent_done: "已完成",
+        agent_parallel: "并行",
+        agent_no_match: "未找到匹配，建议调整预算或地点",
+
         field_condition: "成色",
         field_seller: "卖家",
         field_location: "地点",
@@ -80,8 +85,9 @@ var I18N = {
         cond_unknown: "成色未知",
         loc_unknown: "地点未知",
 
-        need_label: "需求: ",
-        budget_label: "预算",
+        need_label: "需求：",
+        budget_label: "预算：",
+        location_label: "地点：",
         processing: "处理中...",
         request_fail: "请求失败: ",
         backend_hint: "（请确认后端服务已启动）",
@@ -152,6 +158,11 @@ var I18N = {
         risk_yellow: "Consider",
         risk_red: "Not Recommended",
 
+        agent_panel_title: "Agent Work Panel",
+        agent_done: "Done",
+        agent_parallel: "Parallel",
+        agent_no_match: "No matches found, try adjusting budget or location",
+
         field_condition: "Condition",
         field_seller: "Seller",
         field_location: "Location",
@@ -164,7 +175,8 @@ var I18N = {
         loc_unknown: "Unknown",
 
         need_label: "Need: ",
-        budget_label: "budget",
+        budget_label: "Budget: ",
+        location_label: "Location: ",
         processing: "Processing...",
         request_fail: "Request failed: ",
         backend_hint: " (make sure backend is running)",
@@ -439,10 +451,23 @@ function resetImport() {
 
 // ==================== 主聊天逻辑 ====================
 
+var _animCounter = 0;
+function _scheduleAnimation(el, baseDelayMs) {
+    _animCounter++;
+    var delay = baseDelayMs + _animCounter * 80;
+    el.classList.add("fade-in");
+    el.style.animationDelay = delay + "ms";
+    // 确保动画结束后移除 delay 避免影响后续状态
+    setTimeout(function() {
+        el.style.animationDelay = "";
+    }, delay + 500);
+}
+
 function addMessage(text, type) {
     var div = document.createElement("div");
     div.className = "msg-bubble msg-" + type;
     div.textContent = text;
+    _scheduleAnimation(div, 0);
     chatArea.appendChild(div);
     chatArea.scrollTop = chatArea.scrollHeight;
     return div;
@@ -450,8 +475,9 @@ function addMessage(text, type) {
 
 function addLabel(text) {
     var div = document.createElement("div");
-    div.className = "label";
+    div.className = "label fade-in";
     div.textContent = text;
+    _scheduleAnimation(div, 0);
     chatArea.appendChild(div);
     chatArea.scrollTop = chatArea.scrollHeight;
 }
@@ -465,6 +491,7 @@ function addSteps(steps) {
         s.textContent = step;
         div.appendChild(s);
     });
+    _scheduleAnimation(div, 0);
     chatArea.appendChild(div);
     chatArea.scrollTop = chatArea.scrollHeight;
 }
@@ -474,24 +501,110 @@ function getRiskLabel(level) {
     return t(map[level] || "risk_green");
 }
 
+// 多语言地点/商品名映射，让需求摘要与当前语言统一
+var LOCATION_MAP_ZH_TO_EN = {
+    "校内": "On Campus",
+    "南门": "South Gate",
+    "北门": "North Gate",
+    "东门": "East Gate",
+    "西门": "West Gate",
+    "东区": "East Area",
+    "西区": "West Area",
+    "南区": "South Area",
+    "北区": "North Area"
+};
+var LOCATION_MAP_EN_TO_ZH = {
+    "on campus": "校内", "campus": "校内",
+    "south gate": "南门", "south": "南区",
+    "north gate": "北门", "north": "北区",
+    "east gate": "东门", "east": "东区",
+    "west gate": "西门", "west": "西区",
+    "east area": "东区", "west area": "西区",
+    "south area": "南区", "north area": "北区"
+};
+var PRODUCT_MAP_EN_TO_ZH = {
+    "bicycle": "自行车", "bike": "自行车",
+    "textbook": "教材", "book": "书",
+    "iphone": "iPhone", "ipad": "iPad",
+    "switch": "Switch", "kindle": "Kindle",
+    "headphone": "耳机", "headphones": "耳机",
+    "mouse": "鼠标", "laptop": "笔记本",
+    "lamp": "台灯", "guitar": "吉他",
+    "notebook": "笔记本", "diary": "日记本"
+};
+var PRODUCT_MAP_ZH_TO_EN = {
+    "自行车": "Bicycle", "山地车": "Mountain Bike", "公路车": "Road Bike",
+    "教材": "Textbook", "书": "Book",
+    "iPhone": "iPhone", "iPad": "iPad",
+    "Switch": "Switch", "Kindle": "Kindle",
+    "耳机": "Headphones", "鼠标": "Mouse",
+    "笔记本": "Laptop", "笔记本电脑": "Laptop",
+    "台灯": "Desk Lamp", "吉他": "Guitar",
+    "日记本": "Notebook"
+};
+
+function formatLocation(loc) {
+    if (!loc) return t("field_unknown");
+    var clean = String(loc).trim();
+    if (LANG === "en") {
+        // 中文地点 -> 英文
+        return LOCATION_MAP_ZH_TO_EN[clean] || clean;
+    }
+    // 英文地点 -> 中文
+    var key = clean.toLowerCase();
+    return LOCATION_MAP_EN_TO_ZH[key] || clean;
+}
+
+function formatProductName(name) {
+    if (!name) return t("field_unknown");
+    var clean = String(name).trim();
+    if (LANG === "zh") {
+        // 简单英文商品名 -> 中文
+        var lower = clean.toLowerCase();
+        for (var en in PRODUCT_MAP_EN_TO_ZH) {
+            if (lower === en || lower.indexOf(en) !== -1) {
+                // 保留原字符串中的品牌/型号前缀，替换关键词
+                var re = new RegExp(en, "gi");
+                return clean.replace(re, PRODUCT_MAP_EN_TO_ZH[en]);
+            }
+        }
+        return clean;
+    } else {
+        // 中文商品名 -> 英文（仅对常见词做简单替换）
+        for (var zh in PRODUCT_MAP_ZH_TO_EN) {
+            if (clean.indexOf(zh) !== -1) {
+                return PRODUCT_MAP_ZH_TO_EN[zh];
+            }
+        }
+        // 首字母大写
+        return clean.replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+    }
+}
+
 function addListingCards(results) {
-    results.forEach(function(item) {
+    results.forEach(function(item, index) {
         var card = document.createElement("div");
-        card.className = "card card-" + item.risk_level;
+        card.className = "card card-" + item.risk_level + " fade-in";
+        card.style.animationDelay = (index * 150) + "ms";
 
         var priceDisplay = item.price
             ? (item.price == parseInt(item.price) ? item.price : item.price) + (LANG === "zh" ? "元" : " yuan")
             : t("price_unknown");
 
+        // 卡片字段统一按当前语言显示，避免中英文混杂
+        var condDisplay = item.condition || t("field_unknown");
+        var sellerDisplay = item.seller || t("field_unknown");
+        var locDisplay = item.location ? formatLocation(item.location) : t("field_unknown");
+
         card.innerHTML =
             '<div class="card-header">' +
-                '<span class="card-title">' + (item.product_name || "Unknown") + ' — ' + priceDisplay + '</span>' +
+                '<span class="card-title">' + formatProductName(item.product_name || "Unknown") + ' — ' + priceDisplay + '</span>' +
                 '<span class="card-badge badge-' + item.risk_level + '">' + getRiskLabel(item.risk_level) + '</span>' +
             '</div>' +
             '<div class="card-info">' +
-                '<span>' + t("field_condition") + ': ' + (item.condition || t("field_unknown")) + '</span>' +
-                '<span>' + t("field_seller") + ': ' + (item.seller || t("field_unknown")) + '</span>' +
-                '<span>' + t("field_location") + ': ' + (item.location || t("field_unknown")) + '</span>' +
+                '<span>' + t("field_condition") + ': ' + condDisplay + '</span>' +
+                '<span>' + t("field_seller") + ': ' + sellerDisplay + '</span>' +
+                '<span>' + t("field_location") + ': ' + locDisplay + '</span>' +
             '</div>' +
             (item.risk_reasons && item.risk_reasons.length > 0
                 ? '<div class="card-reasons">' + t("risk_hint") + item.risk_reasons.join("、") + '</div>' : "");
@@ -500,9 +613,146 @@ function addListingCards(results) {
         card.style.cursor = "pointer";
 
         chatArea.appendChild(card);
+        // 清理 inline delay 避免影响后续 hover 交互
+        setTimeout(function(el) { el.style.animationDelay = ""; }, index * 150 + 600, card);
     });
     chatArea.scrollTop = chatArea.scrollHeight;
 }
+
+// ==================== Agent Work Panel ====================
+// 展示任务分解 + 并行协作 + 自验证统计，贴合评分维度
+
+var STEP_STATUS_ICONS = {
+    "done": "\u2713",
+    "warning": "!",
+    "error": "\u2717",
+    "pending": "\u25CB",
+};
+
+var STEP_STATUS_CLASSES = {
+    "done": "step-done",
+    "warning": "step-warning",
+    "error": "step-error",
+    "pending": "step-pending",
+};
+
+// Agent Work Panel staggered timing config (ms)
+var PANEL_STEP_INTERVAL = 350;   // delay between each step card
+var PANEL_STEP_BASE = 200;       // first step delay
+var PANEL_CONNECTOR_OFFSET = 150; // connector delay after last step
+var PANEL_SUMMARY_OFFSET = 350;   // summary delay after last step
+var PANEL_ANIM_DURATION = 500;    // CSS animation duration per element
+
+function addAgentWorkPanel(taskPlan, riskSummary) {
+    if (!taskPlan || taskPlan.length === 0) return;
+
+    var panel = document.createElement("div");
+    panel.className = "agent-panel fade-in";
+    panel.style.animationDelay = "0ms";
+
+    // --- Header ---
+    var header = document.createElement("div");
+    header.className = "agent-panel-header";
+    header.innerHTML =
+        '<span class="agent-panel-dot"></span>' +
+        '<span class="agent-panel-title">' + t("agent_panel_title") + '</span>' +
+        '<span class="agent-panel-status">' + t("agent_done") + '</span>';
+    panel.appendChild(header);
+
+    // --- Steps grid ---
+    var stepsGrid = document.createElement("div");
+    stepsGrid.className = "agent-steps-grid";
+
+    taskPlan.forEach(function(step, i) {
+        var stepDiv = document.createElement("div");
+        var statusClass = STEP_STATUS_CLASSES[step.status] || "step-pending";
+        stepDiv.className = "agent-step-card " + statusClass + " fade-in";
+        var stepDelay = PANEL_STEP_BASE + i * PANEL_STEP_INTERVAL;
+        stepDiv.style.animationDelay = stepDelay + "ms";
+
+        var icon = STEP_STATUS_ICONS[step.status] || STEP_STATUS_ICONS["pending"];
+        var parallelBadge = step.parallel
+            ? '<span class="step-parallel-badge">' + t("agent_parallel") + '</span>'
+            : '';
+
+        stepDiv.innerHTML =
+            '<div class="agent-step-icon">' + icon + '</div>' +
+            '<div class="agent-step-label">' + (step.label || "") + '</div>' +
+            '<div class="agent-step-detail">' + (step.detail || "") + '</div>' +
+            parallelBadge;
+        stepsGrid.appendChild(stepDiv);
+
+        // clean inline delay after animation
+        setTimeout(function(el) { el.style.animationDelay = ""; }, stepDelay + PANEL_ANIM_DURATION + 100, stepDiv);
+    });
+
+    panel.appendChild(stepsGrid);
+
+    // Calculate timing for elements after steps
+    var lastStepDelay = PANEL_STEP_BASE + (taskPlan.length - 1) * PANEL_STEP_INTERVAL;
+    var connectorDelay = lastStepDelay + PANEL_STEP_INTERVAL + PANEL_CONNECTOR_OFFSET;
+    var summaryDelay = connectorDelay + PANEL_STEP_INTERVAL + PANEL_SUMMARY_OFFSET;
+
+    // --- Parallel connector line ---
+    var hasParallel = taskPlan.some(function(s) { return s.parallel; });
+    if (hasParallel) {
+        var connector = document.createElement("div");
+        connector.className = "agent-parallel-connector fade-in";
+        connector.style.animationDelay = connectorDelay + "ms";
+        var matcherLabel = LANG === "zh" ? "语义匹配" : "Matcher";
+        var riskLabel = LANG === "zh" ? "风险评估" : "RiskCheck";
+        connector.innerHTML =
+            '<span class="connector-line"></span>' +
+            '<span class="connector-label">' + matcherLabel + '</span>' +
+            '<span class="connector-plus">+</span>' +
+            '<span class="connector-label">' + riskLabel + '</span>' +
+            '<span class="connector-line"></span>';
+        panel.appendChild(connector);
+        setTimeout(function(el) { el.style.animationDelay = ""; }, connectorDelay + PANEL_ANIM_DURATION + 100, connector);
+    }
+
+    // --- Risk summary grid ---
+    if (riskSummary) {
+        var summaryDiv = document.createElement("div");
+        summaryDiv.className = "agent-summary-grid fade-in";
+        summaryDiv.style.animationDelay = summaryDelay + "ms";
+
+        var greenN = riskSummary.green || 0;
+        var yellowN = riskSummary.yellow || 0;
+        var redN = riskSummary.red || 0;
+
+        summaryDiv.innerHTML =
+            '<div class="summary-card summary-green">' +
+                '<div class="summary-label">' + t("risk_green") + '</div>' +
+                '<div class="summary-num">' + greenN + '</div>' +
+            '</div>' +
+            '<div class="summary-card summary-yellow">' +
+                '<div class="summary-label">' + t("risk_yellow") + '</div>' +
+                '<div class="summary-num">' + yellowN + '</div>' +
+            '</div>' +
+            '<div class="summary-card summary-red">' +
+                '<div class="summary-label">' + t("risk_red") + '</div>' +
+                '<div class="summary-num">' + redN + '</div>' +
+            '</div>';
+        panel.appendChild(summaryDiv);
+        setTimeout(function(el) { el.style.animationDelay = ""; }, summaryDelay + PANEL_ANIM_DURATION + 100, summaryDiv);
+    }
+
+    chatArea.appendChild(panel);
+    chatArea.scrollTop = chatArea.scrollHeight;
+
+    // Return total panel duration so caller can delay subsequent content
+    return summaryDelay + PANEL_ANIM_DURATION;
+}
+
+function addAgentStatus(text, status) {
+    var div = document.createElement("div");
+    div.className = "agent-status" + (status ? " " + status : "") + " fade-in";
+    div.textContent = text;
+    chatArea.appendChild(div);
+    chatArea.scrollTop = chatArea.scrollHeight;
+}
+
 
 function selectListing(listing) {
     addLabel(t("label_negotiating"));
@@ -515,6 +765,7 @@ function selectListing(listing) {
     .then(function(res) { return res.json(); })
     .then(function(data) {
         addLabel(t("label_message"));
+
         var box = document.createElement("div");
         box.className = "negotiation-box";
         box.innerHTML =
@@ -550,10 +801,10 @@ function confirmSend(contact, message) {
                 '<div class="card-info" style="margin-top:8px">' + (LANG === "zh" ? "已发送消息给卖家。提醒：见面验货后再付款，不要提前转账。" : "Message sent. Reminder: inspect the item in person before paying. Never transfer money in advance.") + '</div>';
         } else {
             box.className = "result-box";
-            box.style.background = "#FCEBEB";
-            box.style.borderColor = "#F09595";
+            box.style.background = "var(--c-red-bg)";
+            box.style.borderColor = "var(--border)";
             box.innerHTML =
-                '<div class="label" style="color:#501313">' + t("result_fail") + '</div>' +
+                '<div class="label" style="color:var(--c-red-fg)">' + t("result_fail") + '</div>' +
                 '<div class="card-info">' + (data.error || "Unknown error") + '</div>' +
                 '<div class="card-info" style="margin-top:8px">' + t("result_copy_fallback") + '</div>';
         }
@@ -619,22 +870,33 @@ function sendMessage() {
             if (data.parsed_need) {
                 updateContextFromParsed(data.parsed_need);
             }
-            addSteps(data.steps);
 
-            if (data.parsed_need) {
-                var needText = t("need_label") +
-                    data.parsed_need.product_name + " | " + t("budget_label") +
-                    data.parsed_need.budget + (LANG === "zh" ? "元" : " yuan") + " | " +
-                    data.parsed_need.location;
-                addMessage(needText, "agent");
+            // Agent 工作面板：任务分解 + 并行协作 + 自验证统计
+            // 面板元素依次出现，后续内容延迟到面板完成后
+            var panelDuration = 0;
+            if (data.task_plan) {
+                panelDuration = addAgentWorkPanel(data.task_plan, data.risk_summary);
             }
 
-            if (data.results && data.results.length > 0) {
-                addLabel(t("label_found", { count: data.results.length }));
-                addListingCards(data.results);
-            } else {
-                addMessage(t("msg_no_match"), "agent");
-            }
+            // 延迟显示需求摘要、匹配结果等，等面板动画完成
+            var postDelay = panelDuration + 200;
+            setTimeout(function() {
+                if (data.parsed_need) {
+                    var needText = t("need_label") +
+                        formatProductName(data.parsed_need.product_name) + " | " +
+                        t("budget_label") + data.parsed_need.budget +
+                        (LANG === "zh" ? "元" : " yuan") + " | " +
+                        t("location_label") + formatLocation(data.parsed_need.location);
+                    addMessage(needText, "agent");
+                }
+
+                if (data.results && data.results.length > 0) {
+                    addLabel(t("label_found", { count: data.results.length }));
+                    addListingCards(data.results);
+                } else {
+                    addMessage(t("msg_no_match"), "agent");
+                }
+            }, postDelay);
         } else {
             addMessage(t("request_fail") + (data.error || "unknown"), "agent");
         }

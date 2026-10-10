@@ -2,7 +2,7 @@
 砍价话术生成模块 — 根据商品信息和风险评估生成个性化微信消息
 
 输入: listing dict (含商品信息+风险评估), lang ("zh"/"en")
-输出: <=150字 的微信消息文本
+输出: 自然、完整的微信消息文本（不再硬截断到150字）
 """
 
 # LLM 配置
@@ -149,10 +149,6 @@ Write a WeChat message to the seller in ENGLISH. Do NOT comment on whether the p
     # 清理：去掉首尾引号
     message = message.strip().strip('"').strip("'").strip('"').strip('"').strip()
 
-    # 限制 150 字
-    if len(message) > 150:
-        message = message[:147] + "..."
-
     return message
 
 
@@ -168,7 +164,7 @@ def generate_message(listing, user_need=None, lang="zh"):
         lang: 语言 ("zh" / "en")
 
     Returns:
-        str: <=150字 微信消息
+        str: 自然、完整的微信消息
     """
     # 先尝试 LLM 生成
     llm_result = generate_message_llm(listing, user_need, lang)
@@ -248,10 +244,6 @@ def generate_message_template(listing, user_need=None, lang="zh"):
             parts.append("方便的话可以见面看看实物吗？没问题的话我可以当面交易。")
 
             message = "".join(parts)
-
-    # 限制 150 字
-    if len(message) > 150:
-        message = message[:147] + "..."
 
     return message
 

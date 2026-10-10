@@ -45,6 +45,96 @@ def _com_uninitialize():
             pass
 
 
+def _find_in_session_list(wx, contact_name):
+    """
+    在会话列表中查找联系人，支持多种匹配方式：
+    1. 完全匹配（不区分大小写）
+    2. 包含匹配（备注名/昵称中包含目标名）
+    3. 目标名包含会话名（适用于长名匹配短备注）
+    """
+    try:
+        sessions = wx.SessionBox.get_session()
+    except Exception:
+        sessions = []
+
+    target_name = contact_name.strip().lower()
+    candidates = []
+
+    for s in sessions:
+        if not hasattr(s, "name"):
+            continue
+        session_name = s.name.strip()
+        session_lower = session_name.lower()
+
+        # 完全匹配
+        if session_lower == target_name:
+            return s
+
+        # 备注名包含目标名
+        if target_name in session_lower:
+            candidates.append((len(session_lower) - len(target_name), s))
+
+        # 目标名包含备注名（目标可能是 "张三(工作)", 备注是 "张三"）
+        if session_lower and session_lower in target_name:
+            candidates.append((len(target_name) - len(session_lower), s))
+
+    if candidates:
+        # 选匹配度最高的（差异最小）
+        candidates.sort(key=lambda x: x[0])
+        return candidates[0][1]
+
+    return None
+
+
+def _open_chat_safely(wx, contact_name):
+    """
+    安全打开联系人聊天窗口，尽量避免按回车进入"搜一搜"。
+    优先从会话列表点击；若不在会话列表中，再使用 ChatWith 精确匹配。
+    """
+    # 1. 优先从会话列表匹配并点击
+    target = _find_in_session_list(wx, contact_name)
+    if target:
+        logger.info(f"在会话列表中找到 '{contact_name}'，直接点击打开")
+        target.click()
+        time.sleep(0.6)
+        return True
+
+    # 2. 会话列表中没有，使用 ChatWith 搜索（先精确匹配）
+    logger.warning(f"会话列表中未找到 '{contact_name}'，尝试 ChatWith 搜索")
+    try:
+        # exact=True 尽量打开唯一匹配联系人，避免按回车进入搜一搜
+        wx.ChatWith(who=contact_name, exact=True)
+        time.sleep(0.6)
+        return True
+    except Exception:
+        logger.warning(f"ChatWith(exact=True) 失败，回退到模糊搜索")
+
+    # 3. 精确匹配失败，回退到模糊搜索
+    try:
+        wx.ChatWith(who=contact_name, exact=False)
+        time.sleep(0.6)
+        return True
+    except Exception as e:
+        logger.error(f"ChatWith 搜索失败: {e}")
+        return False
+
+
+def _verify_chat_window(wx, expected_name):
+    """
+    尝试验证当前聊天窗口的联系人是否为预期联系人。
+    如果验证失败，返回 False，避免消息发错对象。
+    """
+    try:
+        # wxauto4 常见方法：获取当前聊天窗口名称
+        current_name = wx.GetCurrentChatName()
+        if current_name and expected_name.lower() in current_name.lower():
+            return True
+    except Exception:
+        # 如果 API 不存在或调用失败，跳过验证
+        pass
+    return True
+
+
 def send_message(contact_name, message_text):
     """
     通过微信发送消息给指定联系人
@@ -71,26 +161,25 @@ def send_message(contact_name, message_text):
         wx.SwitchToChat()
         time.sleep(0.2)
 
-        # 步骤2：从会话列表中直接查找并点击联系人（不走搜索框，避免触发"搜一搜"）
-        sessions = wx.SessionBox.get_session()
-        target = None
-        for s in sessions:
-            if contact_name.lower() == s.name.lower():
-                target = s
-                break
+        # 步骤2：安全打开联系人聊天窗口
+        opened = _open_chat_safely(wx, contact_name)
+        if not opened:
+            return {
+                "status": "error",
+                "contact": contact_name,
+                "error": f"未找到联系人 '{contact_name}'，请确认名称正确",
+            }
 
-        if target:
-            # 在会话列表中找到了，直接点击打开聊天
-            target.click()
-            time.sleep(0.5)
-        else:
-            # 会话列表中没有，回退到 ChatWith 搜索
-            # 注意：ChatWith 内部可能按回车导致"搜一搜"，仅作降级
-            logger.warning(f"会话列表中未找到 '{contact_name}'，回退到搜索模式")
-            wx.ChatWith(who=contact_name, exact=False)
-            time.sleep(0.5)
+        # 步骤3：验证当前聊天窗口（如 API 可用）
+        if not _verify_chat_window(wx, contact_name):
+            logger.error(f"当前聊天窗口不是 '{contact_name}'，取消发送")
+            return {
+                "status": "error",
+                "contact": contact_name,
+                "error": f"打开联系人 '{contact_name}' 后验证失败，消息未发送",
+            }
 
-        # 步骤3：发送消息（who 留空，发送给当前已打开的聊天窗口）
+        # 步骤4：发送消息（who 留空，发送给当前已打开的聊天窗口）
         wx.SendMsg(msg=message_text)
 
         logger.info(f"消息已发送给 {contact_name}")

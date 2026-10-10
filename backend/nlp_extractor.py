@@ -116,17 +116,17 @@ def extract_price(content):
 def extract_contact(content):
     """提取联系方式 (Bilingual: 微信/WeChat/wx/contact/VX)"""
     patterns = [
-        r'微信\s*[:：]?\s*([a-zA-Z0-9_]+)',
-        r'WeChat\s*[:：]?\s*([a-zA-Z0-9_]+)',
-        r'contact\s+([a-zA-Z0-9_]+)',
-        r'wx_?\s*[:：]?\s*([a-zA-Z0-9_]+)',
-        r'联系\s*[:：]?\s*([a-zA-Z0-9_]+)',
-        r'VX\s*[:：]?\s*([a-zA-Z0-9_]+)',
+        r'微信\s*[:：]?\s*([a-zA-Z0-9_ ]+)',
+        r'WeChat\s*[:：]?\s*([a-zA-Z0-9_ ]+)',
+        r'contact\s*[:：]?\s*([a-zA-Z0-9_ ]+)',
+        r'wx_?\s*[:：]?\s*([a-zA-Z0-9_ ]+)',
+        r'联系\s*[:：]?\s*([a-zA-Z0-9_ ]+)',
+        r'VX\s*[:：]?\s*([a-zA-Z0-9_ ]+)',
     ]
     for pattern in patterns:
         match = re.search(pattern, content, re.IGNORECASE)
         if match:
-            return match.group(1)
+            return match.group(1).strip()
     # "私聊" or "DM" indicates seller wants contact but didn't provide
     if "私聊" in content or re.search(r'\bDM\b', content, re.IGNORECASE):
         return None
@@ -483,11 +483,52 @@ def extract_listings_regex(chat_data, lang="zh"):
     return listings
 
 
+def _normalize_location(loc, lang="zh"):
+    """把常见英文/中文地点统一标准化"""
+    if not loc:
+        return None
+    loc_str = str(loc).strip()
+    key = loc_str.lower()
+
+    if lang == "en":
+        # 中文 -> 英文；英文已标准化则保留
+        return EN_LOCATIONS_MAP.get(loc_str) or EN_LOCATIONS_MAP.get(key) or loc_str
+
+    # zh: 英文 -> 中文；中文已标准化则保留
+    return EN_LOCATIONS_MAP.get(key) or loc_str
+
+
+def _normalize_condition(cond):
+    """把英文成色描述统一转为中文成色"""
+    if not cond:
+        return None
+    cond_str = str(cond).strip().lower()
+    mapping = {
+        "brand new never used": "全新",
+        "brand new": "全新",
+        "never used": "全新",
+        "10/10 condition": "10成新",
+        "9/10 condition": "9成新",
+        "8/10 condition": "8成新",
+        "7/10 condition": "7成新",
+        "6/10 condition": "6成新",
+        "5/10 condition": "5成新",
+        "10/10": "10成新",
+        "9/10": "9成新",
+        "8/10": "8成新",
+        "7/10": "7成新",
+        "6/10": "6成新",
+        "5/10": "5成新",
+    }
+    return mapping.get(cond_str) or cond_str
+
+
 def extract_listings(chat_data, lang="zh"):
     """
     从群聊消息中提取二手交易出售信息 (Bilingual)
 
     优先使用 LLM 提取，失败时自动回退到正则提取。
+    提取后会用正则再补全缺失的 location / condition / contact。
 
     Args:
         chat_data: list of {sender, content, time}
@@ -497,12 +538,33 @@ def extract_listings(chat_data, lang="zh"):
         list of listing dicts
     """
     # 先尝试 LLM 提取
-    llm_result = extract_listings_llm(chat_data, lang=lang)
-    if llm_result is not None:
-        return llm_result
+    listings = extract_listings_llm(chat_data, lang=lang)
+    if listings is None:
+        # 回退到正则提取
+        listings = extract_listings_regex(chat_data, lang=lang)
 
-    # 回退到正则提取
-    return extract_listings_regex(chat_data, lang=lang)
+    # 后处理：补全缺失字段
+    for item in listings:
+        content = item.get("description") or item.get("source_text") or ""
+        if not item.get("location"):
+            # 先用通用双语函数尝试提取
+            loc = extract_location(content)
+            if not loc:
+                loc = extract_location_en(content)
+            item["location"] = _normalize_location(loc, lang)
+        else:
+            item["location"] = _normalize_location(item["location"], lang)
+
+        if not item.get("condition"):
+            cond = extract_condition(content)
+            item["condition"] = _normalize_condition(cond)
+        else:
+            item["condition"] = _normalize_condition(item["condition"])
+
+        if not item.get("contact"):
+            item["contact"] = extract_contact(content)
+
+    return listings
 
 
 def load_mock_data(filepath=None):

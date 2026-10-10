@@ -20,9 +20,50 @@ from matcher import parse_user_need, match_listings
 from risk_check import check_all_risks, get_risk_label
 from negotiator import generate_message, generate_summary
 from wxauto_sender import send_message, check_wechat_status
+from agents import get_orchestrator
 
 app = Flask(__name__, static_folder='../frontend', static_url_path='')
 CORS(app)
+
+# 中文->英文 显示映射（与前端 LOCATION_MAP_ZH_TO_EN / PRODUCT_MAP_ZH_TO_EN 保持一致）
+_ZH_TO_EN_LOC = {
+    "校内": "On Campus", "南门": "South Gate", "北门": "North Gate",
+    "东门": "East Gate", "西门": "West Gate",
+    "东区": "East Area", "西区": "West Area", "南区": "South Area", "北区": "North Area",
+}
+_ZH_TO_EN_PRODUCT = {
+    "自行车": "Bicycle", "山地车": "Mountain Bike", "公路车": "Road Bike",
+    "教材": "Textbook", "书": "Book",
+    "iPhone": "iPhone", "iPad": "iPad", "Switch": "Switch", "Kindle": "Kindle",
+    "耳机": "Headphones", "鼠标": "Mouse",
+    "笔记本": "Laptop", "笔记本电脑": "Laptop",
+    "台灯": "Desk Lamp", "吉他": "Guitar",
+    "日记本": "Notebook", "煮蛋器": "Egg Cooker", "电饭煲": "Rice Cooker",
+    "手环": "Bracelet", "牙刷": "Toothbrush",
+    "高等数学": "Calculus", "线性代数": "Linear Algebra",
+}
+
+
+def _display_product(name, lang):
+    """Translate product name for display (Chinese listings -> English when lang=en)."""
+    if not name:
+        return "?"
+    if lang == "en":
+        for zh, en in _ZH_TO_EN_PRODUCT.items():
+            if zh in name:
+                return name.replace(zh, en)
+        # Capitalize first letter if no mapping found
+        return name[0].upper() + name[1:] if name else name
+    return name
+
+
+def _display_location(loc, lang):
+    """Translate location for display."""
+    if not loc:
+        return "?"
+    if lang == "en":
+        return _ZH_TO_EN_LOC.get(loc, loc)
+    return loc
 
 # 全局状态
 _extracted_listings = None      # AI提取的全部候选listings（等用户确认）
@@ -298,31 +339,77 @@ def api_start():
             },
         })
 
-    # 执行 Agent 工作流
-    steps = []
+    # 执行 Agent 工作流（Orchestrator: 并行执行 + 自验证）
+    orch = get_orchestrator()
     listings = get_listings()
-    if lang == "en":
-        steps.append(f"Read {len(listings)} listings from imported data (AI extracted)")
-    else:
-        steps.append(f"读取 {len(listings)} 个商品（AI 提取）")
 
-    matched = match_listings(listings, user_need, lang=lang)
-    if lang == "en":
-        steps.append(f"AI semantic matching -> {len(matched)} found")
-    else:
-        steps.append(f"AI 语义匹配 → {len(matched)} 个符合")
+    results, agent_logs, parallel_info = orch.execute_pipeline(listings, user_need, lang=lang)
 
-    enriched = check_all_risks(matched, lang)
-    if lang == "en":
-        steps.append("AI risk assessment complete")
-    else:
-        steps.append("AI 风险评估完成")
+    # 风险统计
+    green_count = sum(1 for r in results if r.get("risk_level") == "green")
+    yellow_count = sum(1 for r in results if r.get("risk_level") == "yellow")
+    red_count = sum(1 for r in results if r.get("risk_level") == "red")
 
-    # 构建 Result cards
-    results = []
-    for item in enriched:
-        results.append({
-            "id": len(results) + 1,
+    # 构造任务里程碑（双语，根据实际结果填充）
+    product = _display_product(user_need.get("product_name", "?"), lang)
+    budget = user_need.get("budget", "?")
+    location = _display_location(user_need.get("location", "?"), lang)
+    # 英文标准化展示
+    if lang == "en":
+        loc_display = location
+        budget_display = f"{budget} yuan"
+        match_detail = f"{len(results)} candidate{'s' if len(results) != 1 else ''} matched"
+        risk_detail = f"{green_count} green / {yellow_count} yellow / {red_count} red"
+        no_match_msg = "No matches found, consider adjusting budget or location"
+        task_plan = [
+            {"step": 1, "label": "Parse intent", "agent": "Orchestrator",
+             "status": "done", "detail": f"{product} · {budget_display} · {loc_display}"},
+            {"step": 2, "label": "Semantic match", "agent": "Matcher",
+             "status": "done" if results else "warning",
+             "detail": match_detail if results else no_match_msg,
+             "parallel": True},
+            {"step": 3, "label": "Risk assessment", "agent": "RiskCheck",
+             "status": "done",
+             "detail": risk_detail if results else "No items to assess",
+             "parallel": True},
+            {"step": 4, "label": "Sort & rank", "agent": "Orchestrator",
+             "status": "done" if results else "warning",
+             "detail": "by risk + score" if results else "n/a"},
+        ]
+    else:
+        loc_display = location
+        budget_display = f"{budget}元"
+        match_detail = f"匹配 {len(results)} 个候选"
+        risk_detail = f"{green_count}绿 / {yellow_count}黄 / {red_count}红"
+        no_match_msg = "未找到匹配，建议调整预算或地点"
+        task_plan = [
+            {"step": 1, "label": "解析需求", "agent": "Orchestrator",
+             "status": "done", "detail": f"{product} · {budget_display} · {loc_display}"},
+            {"step": 2, "label": "语义匹配", "agent": "Matcher",
+             "status": "done" if results else "warning",
+             "detail": match_detail if results else no_match_msg,
+             "parallel": True},
+            {"step": 3, "label": "风险评估", "agent": "RiskCheck",
+             "status": "done",
+             "detail": risk_detail if results else "无可评估项",
+             "parallel": True},
+            {"step": 4, "label": "排序推荐", "agent": "Orchestrator",
+             "status": "done" if results else "warning",
+             "detail": "按风险+分数排序" if results else "无"},
+        ]
+
+    risk_summary = {
+        "green": green_count,
+        "yellow": yellow_count,
+        "red": red_count,
+        "total": len(results),
+    }
+
+    # Build Result cards
+    result_cards = []
+    for item in results:
+        result_cards.append({
+            "id": len(result_cards) + 1,
             "product_name": item.get("product_name"),
             "price": item.get("price"),
             "condition": item.get("condition"),
@@ -338,13 +425,14 @@ def api_start():
 
     return jsonify({
         "status": "complete",
-        "steps": steps,
         "parsed_need": {
-            "product_name": user_need["product_name"],
+            "product_name": product,
             "budget": user_need["budget"],
-            "location": user_need["location"],
+            "location": location,
         },
-        "results": results,
+        "results": result_cards,
+        "task_plan": task_plan,
+        "risk_summary": risk_summary,
     })
 
 
@@ -358,7 +446,10 @@ def api_negotiate():
 
     listing = data["listing"]
     lang = data.get("lang", "zh")
-    message = generate_message(listing, lang=lang)
+
+    # Use NegotiatorAgent (with logging)
+    orch = get_orchestrator()
+    message, agent_logs = orch.negotiate(listing, lang=lang)
     summary = generate_summary(listing, message, lang=lang)
 
     return jsonify({
@@ -366,6 +457,7 @@ def api_negotiate():
         "message": message,
         "contact": listing.get("seller"),
         "summary": summary,
+        "agent_logs": agent_logs,
     })
 
 

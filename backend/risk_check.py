@@ -185,23 +185,22 @@ def check_risk_rules(listing, lang="zh"):
     规则引擎风险评估（降级方案）
 
     规则:
-    - 无联系方式 -> red
+    - 无联系方式 + 描述极短 -> red
     - 价格异常低 (< 30元非教材类) -> red
-    - 描述为空或 < 5字 -> yellow
-    - 无成色信息 -> yellow
+    - 无联系方式 / 描述简略 / 无成色信息 -> yellow
     - 正常信息 -> green
     """
     tr = RISK_REASONS.get(lang, RISK_REASONS["zh"])
     reasons = []
 
     contact = listing.get("contact")
-    if not contact or contact == "null":
-        reasons.append(tr["no_contact"])
-
     price = listing.get("price")
     product_name = listing.get("product_name") or ""
     description = listing.get("description") or ""
     condition = listing.get("condition")
+
+    if not contact or contact == "null":
+        reasons.append(tr["no_contact"])
 
     # 价格异常低
     book_kw = "书" if lang == "zh" else "book"
@@ -222,8 +221,9 @@ def check_risk_rules(listing, lang="zh"):
     if not condition or condition == "null":
         reasons.append(tr["no_condition"])
 
-    # 判定风险等级
-    has_red_signal = any(r in [tr["no_contact"], tr["low_price"]] for r in reasons)
+    # 判定风险等级：只有强危险信号才标红
+    has_red_signal = (tr["low_price"] in reasons or
+                      (tr["no_contact"] in reasons and tr["short_desc"] in reasons))
     has_yellow_signal = len(reasons) > 0
 
     if has_red_signal:
