@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Logs
+wxauto_logs/
+*.log
+
+# WorkBuddy internal
+.workbuddy-ai/
+.wbapp_*.genie
+
+# Environment
+.env
+venv/
+.venv/
+
+# OS
+Thumbs.db
+.DS_Store

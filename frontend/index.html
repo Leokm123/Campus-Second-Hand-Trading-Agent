@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campus Second-Hand Trading Agent</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- ===== 导入数据 Overlay ===== -->
+    <div class="import-overlay" id="importOverlay">
+        <div class="import-box">
+            <button class="lang-btn import-lang-btn" id="importLangBtn" onclick="toggleLanguage()">EN</button>
+            <!-- 步骤1: 选择数据源 -->
+            <div id="importStep1">
+                <div class="import-header">
+                    <h2 data-i18n="import_title">导入群聊数据</h2>
+                    <p class="import-desc" data-i18n="import_desc">从群聊记录中提取二手交易信息，AI会自动筛选商品并让你确认</p>
+                </div>
+
+                <div class="source-tabs">
+                    <button class="source-tab active" id="tabDemo" onclick="switchSource('demo')" data-i18n="source_demo">演示数据</button>
+                    <button class="source-tab" id="tabText" onclick="switchSource('text')" data-i18n="source_text">粘贴文本</button>
+                    <button class="source-tab" id="tabFile" onclick="switchSource('file')" data-i18n="source_file">上传文件</button>
+                </div>
+
+                <!-- 演示数据面板 -->
+                <div class="source-panel active" id="panelDemo">
+                    <p class="panel-hint" data-i18n="demo_hint">点击下方按钮加载内置演示数据（30条模拟群聊消息）</p>
+                    <div class="demo-preview" id="demoPreview">
+                        <div class="demo-msg">Zhang: Selling Giant ATX660 bicycle, 9/10 condition, 250 yuan, WeChat: zhang123, South Gate trade</div>
+                        <div class="demo-msg">Li: Merida Duke 300, 8/10 condition, 280 yuan, free shipping on campus, contact wx_li456</div>
+                        <div class="demo-msg">Liu: Selling iPhone 12 128G, 9/10 condition, 1800 yuan, with original charger, East Area trade</div>
+                        <div class="demo-msg" style="opacity:0.5">Zhao: Same model on Xianyu is only 200 something</div>
+                        <div class="demo-msg" style="opacity:0.5">Lin: Anyone selling a Switch? Looking for one, budget around 800</div>
+                        <div class="demo-msg" data-i18n="demo_more">...30 messages total</div>
+                    </div>
+                </div>
+
+                <!-- 粘贴文本面板 -->
+                <div class="source-panel" id="panelText">
+                    <p class="panel-hint" data-i18n="text_hint">粘贴群聊记录（每行一条，格式：昵称: 消息内容）</p>
+                    <textarea id="pasteText" class="paste-area" data-i18n-ph="paste_placeholder" placeholder="Zhang: Selling Giant ATX660 bicycle, 9/10 condition, 250 yuan, WeChat: zhang123, South Gate trade&#10;Li: Merida Duke 300, 8/10 condition, 280 yuan, free shipping on campus, contact wx_li456&#10;Wang: Anyone want second-hand textbooks? Calculus and Linear Algebra available, 20 yuan each, trade on campus&#10;..."></textarea>
+                </div>
+
+                <!-- 上传文件面板 -->
+                <div class="source-panel" id="panelFile">
+                    <p class="panel-hint" data-i18n="file_hint">选择 .txt 或 .json 文件（聊天记录导出）</p>
+                    <label class="file-upload-area" for="fileInput">
+                        <span class="upload-icon">[ + ]</span>
+                        <span class="upload-text" data-i18n="file_select">点击选择文件</span>
+                        <span id="fileName" class="file-name"></span>
+                    </label>
+                    <input type="file" id="fileInput" accept=".txt,.json" style="display:none" onchange="handleFileSelect(this)">
+                </div>
+
+                <button class="btn btn-primary import-btn" onclick="processImport()" id="importBtn" data-i18n="btn_extract">
+                    AI 提取商品信息
+                </button>
+            </div>
+
+            <!-- 步骤2: 确认导入 -->
+            <div id="importStep2" style="display:none">
+                <div class="import-header">
+                    <h2 data-i18n="confirm_title">确认导入</h2>
+                    <p class="import-desc" id="importStats"></p>
+                </div>
+
+                <div class="confirm-toolbar">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="selectAll" onchange="toggleAll(this)">
+                        <span data-i18n="select_all">全选</span>
+                    </label>
+                    <span class="selected-count" id="selectedCount"></span>
+                </div>
+
+                <div class="confirm-list" id="confirmList"></div>
+
+                <div class="confirm-actions">
+                    <button class="btn btn-secondary" onclick="backToStep1()" data-i18n="btn_back">返回</button>
+                    <button class="btn btn-primary" onclick="confirmImport()" id="confirmBtn" data-i18n="btn_confirm_import">
+                        确认导入选中项
+                    </button>
+                </div>
+            </div>
+
+            <!-- 加载动画 -->
+            <div id="importLoading" style="display:none">
+                <div class="loading-spinner"></div>
+                <p class="loading-text" id="loadingText" data-i18n="loading_extract">AI 正在提取商品信息...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== 主聊天界面 ===== -->
+    <div class="container">
+        <div class="header">
+            <h1 data-i18n="app_title">校园二手交易 Agent</h1>
+            <span class="subtitle">Powered by WorkBuddy</span>
+            <button class="lang-btn" id="langBtn" onclick="toggleLanguage()">EN</button>
+            <button class="reset-btn" onclick="resetImport()" data-i18n="btn_reimport">重新导入数据</button>
+        </div>
+
+        <div class="chat-area" id="chatArea">
+            <div class="welcome-msg">
+                <p data-i18n="welcome_1">你好！我是你的校园二手交易助手。</p>
+                <p data-i18n="welcome_2">告诉我你想找什么、预算多少、在哪交易，我来帮你从群聊数据里找货、筛选、评估风险、联系卖家。</p>
+                <p class="example" data-i18n="welcome_example">例如：looking for a bicycle, budget 300, on campus</p>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <input type="text" id="userInput" data-i18n-ph="input_placeholder" placeholder="输入需求，例如：looking for a bicycle, budget 300, on campus" autocomplete="off">
+            <button id="sendBtn" onclick="sendMessage()" data-i18n="btn_send">发送</button>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

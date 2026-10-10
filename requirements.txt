@@ -1,0 +1,5 @@
+flask
+flask-cors
+wxauto4
+openai
+pywin32
